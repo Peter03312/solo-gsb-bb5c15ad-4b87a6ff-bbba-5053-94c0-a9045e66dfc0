@@ -1,0 +1,81 @@
+### 实验室检测报告放行 API 调用示例（VS Code REST Client / JetBrains HTTP Client）
+@host = http://localhost:8000
+@instrument = LCMS-01
+@t = 2026-06-01T10:00:00+08:00
+
+### 健康检查
+GET {{host}}/health
+
+### 1) 登记首版校准（通过；区间 [2026-01-01, 2027-01-01)）
+POST {{host}}/calibrations
+Content-Type: application/json
+
+{
+  "instrument_id": "{{instrument}}",
+  "passed": true,
+  "valid_from": "2026-01-01T00:00:00+08:00",
+  "valid_to": "2027-01-01T00:00:00+08:00",
+  "note": "年度校准 v1"
+}
+
+### 2) 区间重叠再登记 -> 409 interval_conflict
+POST {{host}}/calibrations
+Content-Type: application/json
+
+{
+  "instrument_id": "{{instrument}}",
+  "passed": true,
+  "valid_from": "2026-06-01T00:00:00+08:00",
+  "valid_to": "2026-08-01T00:00:00+08:00"
+}
+
+### 3) 报告发布成功（时点被通过校准覆盖；返回所据版本 v1 快照）
+POST {{host}}/reports
+Content-Type: application/json
+
+{
+  "instrument_id": "{{instrument}}",
+  "test_time": "{{t}}"
+}
+
+### 4) 无覆盖时点 -> 422 release_blocked / no_coverage
+POST {{host}}/reports
+Content-Type: application/json
+
+{
+  "instrument_id": "{{instrument}}",
+  "test_time": "2025-12-31T23:59:59+08:00"
+}
+
+### 5) 更正校准（引用 lineage_id=1，必须连续提交 v2；示例：v2 缩小有效区间）
+###    旧版 v1 保留可查，仅 v2 参与判定
+POST {{host}}/calibrations/1/corrections
+Content-Type: application/json
+
+{
+  "version": 2,
+  "passed": true,
+  "valid_from": "2026-01-01T00:00:00+08:00",
+  "valid_to": "2026-05-01T00:00:00+08:00",
+  "note": "仪器搬迁后重新校准，v1 区间更正缩短"
+}
+
+### 6) 重复提交 v2 / 跳号 v3 -> 409 version_conflict
+POST {{host}}/calibrations/1/corrections
+Content-Type: application/json
+
+{
+  "version": 2,
+  "passed": true,
+  "valid_from": "2026-01-01T00:00:00+08:00",
+  "valid_to": "2026-06-01T00:00:00+08:00"
+}
+
+### 7) 查询版本链全部历史版本
+GET {{host}}/calibrations/lineages/1
+
+### 8) 校准更正后重算：列出当前结论与快照不同的已发布报告（不改写快照）
+GET {{host}}/reports/recompute-drift?changed_only=true
+
+### 9) 查看已发布报告（basis 仍是发布时的 v1 快照）
+GET {{host}}/reports?status=published
